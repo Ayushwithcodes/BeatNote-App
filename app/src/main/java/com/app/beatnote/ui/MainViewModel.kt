@@ -12,6 +12,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.app.beatnote.data.BackupStorageManager
 import com.app.beatnote.data.MusicRepository
 import com.app.beatnote.data.PlaylistEntity
 import com.app.beatnote.data.NoteDraft
@@ -41,6 +42,7 @@ class MainViewModel(
     private val notesRepository: NotesRepository
 ) : ViewModel() {
     private val applicationContext = context.applicationContext
+    private val backupStorageManager = BackupStorageManager(applicationContext)
 
     private val _songs = MutableStateFlow<List<Song>>(emptyList())
     val songs: StateFlow<List<Song>> = _songs.asStateFlow()
@@ -122,6 +124,9 @@ class MainViewModel(
     private var notesSongId: String? = null
     private var notesDirty = false
     private var activeDraftId: Long? = null
+    private var notesSongTitle: String? = null
+    private var backupRestoreError: String? = null
+    private var backupRestoreCompleted = false
     private var playlistsJob: Job? = null
     private var pendingSong: Song? = null
     private var controller: MediaController? = null
@@ -287,8 +292,8 @@ class MainViewModel(
         }
     }
 
-    fun selectSong(song: Song) {
-        val queue = allScannedSongs.toMutableList()
+    fun selectSong(song: Song, currentList: List<Song>) {
+        val queue = currentList.distinctBy { it.id }.toMutableList()
         val selectedIndex = queue.indexOfFirst { it.id == song.id }
         val currentIndex = if (selectedIndex >= 0) {
             selectedIndex
@@ -312,12 +317,13 @@ class MainViewModel(
         if (notesSongId != song.id) {
             flushNotes()
             notesSongId = song.id
+            notesSongTitle = song.title
             activeDraftId = null
             notesDirty = false
             _currentSongDrafts.value = emptyList()
             _activeDraft.value = null
             _notesLoading.value = true
-            _notesError.value = null
+            _notesError.value = backupRestoreError
             draftsLoadJob?.cancel()
             draftsLoadJob = viewModelScope.launch {
                 try {
@@ -408,6 +414,20 @@ class MainViewModel(
             try {
                 pendingDraftSaveJob?.join()
                 notesRepository.deleteDraft(draft)
+                try {
+                    val songTitle = allScannedSongs.firstOrNull { it.id == draft.songUri }?.title
+                        ?: notesSongTitle?.takeIf { draft.songUri == notesSongId }
+                        ?: throw IllegalStateException("Song title is unavailable for this draft")
+                    backupStorageManager.deleteDraftBackup(songTitle, draft.draftTitle)
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (exception: Exception) {
+                    Log.e(TAG, "Failed to remove backup for draft ${draft.id}", exception)
+                    if (notesSongId == draft.songUri) {
+                        _notesError.value =
+                            "The draft was deleted in the app, but its file backup remains."
+                    }
+                }
                 if (activeDraftId == draft.id) {
                     activeDraftId = null
                     _activeDraft.value = null
@@ -519,6 +539,14 @@ class MainViewModel(
                 val scannedSongs = repository.scanSongs()
                 allScannedSongs = scannedSongs
                 updatePinnedSongs()
+                val songsAvailableInState = _songs.value
+                Log.d(
+                    BACKUP_LOG_TAG,
+                    "Audio scan completed with ${songsAvailableInState.size} songs in library StateFlow; starting backup restore"
+                )
+                if (!backupRestoreCompleted && songsAvailableInState.isNotEmpty()) {
+                    restoreDraftBackups(songsAvailableInState)
+                }
                 if (_playbackQueue.value.isEmpty()) {
                     _playbackQueue.value = scannedSongs
                 }
@@ -710,6 +738,25 @@ class MainViewModel(
             previousSave?.join()
             try {
                 notesRepository.updateDraft(draft)
+                try {
+                    val songTitle = allScannedSongs.firstOrNull { it.id == draft.songUri }?.title
+                        ?: _selectedSong.value?.takeIf { it.id == draft.songUri }?.title
+                        ?: notesSongTitle?.takeIf { draft.songUri == notesSongId }
+                        ?: throw IllegalStateException("Song title is unavailable for this draft")
+                    backupStorageManager.saveDraftToFile(
+                        songTitle = songTitle,
+                        draftName = draft.draftTitle,
+                        content = draft.content
+                    )
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (exception: Exception) {
+                    Log.e(TAG, "Failed to write backup for draft ${draft.id}", exception)
+                    if (notesSongId == draft.songUri) {
+                        _notesError.value =
+                            "Your notes were saved in the app, but the file backup failed."
+                    }
+                }
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
@@ -722,8 +769,35 @@ class MainViewModel(
         }
     }
 
+    private suspend fun restoreDraftBackups(songs: List<Song>) {
+        try {
+            val backups = backupStorageManager.restoreDraftsFromStorage(songs)
+            var upsertedDraftCount = 0
+            backups.forEach { (songUri, drafts) ->
+                upsertedDraftCount += notesRepository.restoreDraftsFromBackup(songUri, drafts)
+            }
+            Log.d(
+                BACKUP_LOG_TAG,
+                "Restore completed for ${backups.size} matched songs; $upsertedDraftCount drafts inserted or updated in Room"
+            )
+            backupRestoreCompleted = true
+            if (_notesError.value == backupRestoreError) {
+                _notesError.value = null
+            }
+            backupRestoreError = null
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            Log.e(BACKUP_LOG_TAG, "Failed to restore lyric backups", exception)
+            backupRestoreError =
+                "Couldn't check the lyric backup files. Existing app notes are unchanged."
+            _notesError.value = backupRestoreError
+        }
+    }
+
     private companion object {
         const val TAG = "MainViewModel"
+        const val BACKUP_LOG_TAG = "BeatNoteBackup"
         const val NOTES_SAVE_DEBOUNCE_MS = 500L
         const val POSITION_UPDATE_INTERVAL_MS = 200L
         const val PREVIOUS_TRACK_RESTART_THRESHOLD_MS = 3_000L

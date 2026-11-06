@@ -69,11 +69,20 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private fun requiredAudioPermission(): String =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+private fun requiredAudioPermission(): String = when {
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
         Manifest.permission.READ_MEDIA_AUDIO
+    else -> Manifest.permission.READ_EXTERNAL_STORAGE
+}
+
+private fun storagePermissionsToRequest(): Array<String> =
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        arrayOf(
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+        )
     } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
+        arrayOf(requiredAudioPermission())
     }
 
 private class MainViewModelFactory(
@@ -115,10 +124,15 @@ fun BeatNoteApp(viewModel: MainViewModel) {
     val notesLoading by viewModel.notesLoading.collectAsState()
     val notesError by viewModel.notesError.collectAsState()
 
-    val audioPermission = remember { requiredAudioPermission() }
+    val storagePermissions = remember { storagePermissionsToRequest() }
     val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = viewModel::setPermissionGranted
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = {
+            viewModel.setPermissionGranted(
+                ContextCompat.checkSelfPermission(context, requiredAudioPermission()) ==
+                    PackageManager.PERMISSION_GRANTED
+            )
+        }
     )
 
     val pagerState = rememberPagerState(pageCount = { 2 })
@@ -150,8 +164,8 @@ fun BeatNoteApp(viewModel: MainViewModel) {
                     libraryActionError = libraryActionError,
                     selectedSong = selectedSong,
                     selectedSongId = selectedSong?.id,
-                    onSongSelected = { song ->
-                        viewModel.selectSong(song)
+                    onSongSelected = { song, currentList ->
+                        viewModel.selectSong(song, currentList)
                         coroutineScope.launch {
                             pagerState.animateScrollToPage(1)
                         }
@@ -160,13 +174,13 @@ fun BeatNoteApp(viewModel: MainViewModel) {
                         if (permissionGranted) {
                             viewModel.refreshLibrary()
                         } else {
-                            permissionLauncher.launch(audioPermission)
+                            permissionLauncher.launch(storagePermissions)
                         }
                     },
                     isLoading = isLoading,
                     permissionGranted = permissionGranted,
                     errorMessage = errorMessage,
-                    onRequestPermission = { permissionLauncher.launch(audioPermission) },
+                    onRequestPermission = { permissionLauncher.launch(storagePermissions) },
                     isPlaying = isPlaying,
                     currentPositionMs = currentPositionMs,
                     totalDurationMs = totalDurationMs,

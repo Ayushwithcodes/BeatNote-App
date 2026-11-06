@@ -55,6 +55,36 @@ class NotesRepository(context: Context) {
         }
     }
 
+    suspend fun restoreDraftsFromBackup(
+        songUri: String,
+        drafts: List<Pair<String, String>>
+    ): Int = database.withTransaction {
+        if (drafts.isEmpty()) return@withTransaction 0
+        var upsertedCount = 0
+        notesDao.insertNoteEntity(NoteEntity(songUri = songUri, legacyContent = ""))
+        drafts.distinctBy { it.first }.forEach { (title, content) ->
+            val existingDraft = notesDao.getDraftForSongAndTitle(songUri, title)
+            if (existingDraft == null) {
+                notesDao.insertDraft(
+                    NoteDraft(songUri = songUri, draftTitle = title, content = content)
+                )
+            } else {
+                notesDao.updateDraft(
+                    existingDraft.copy(
+                        content = content,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+            upsertedCount++
+        }
+        android.util.Log.d(
+            BACKUP_LOG_TAG,
+            "Upserted $upsertedCount backup drafts for song URI $songUri"
+        )
+        upsertedCount
+    }
+
     suspend fun addDraft(songUri: String, title: String): NoteDraft =
         database.withTransaction {
             notesDao.insertNoteEntity(NoteEntity(songUri = songUri, legacyContent = ""))
@@ -98,6 +128,7 @@ class NotesRepository(context: Context) {
     }
 
     companion object {
+        private const val BACKUP_LOG_TAG = "BeatNoteBackup"
         private const val DEFAULT_DRAFT_TITLE = "Draft 1"
     }
 }

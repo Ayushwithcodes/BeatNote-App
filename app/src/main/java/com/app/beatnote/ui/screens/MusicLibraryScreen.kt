@@ -51,7 +51,7 @@ fun MusicLibraryScreen(
     libraryActionError: String?,
     selectedSong: Song?,
     selectedSongId: String?,
-    onSongSelected: (Song) -> Unit,
+    onSongSelected: (Song, List<Song>) -> Unit,
     onRefresh: () -> Unit,
     isLoading: Boolean,
     permissionGranted: Boolean,
@@ -247,7 +247,7 @@ fun MusicLibraryScreen(
                                     songs = filteredSongs,
                                     selectedSongId = selectedSongId,
                                     pinnedSongIds = pinnedSongs.mapTo(mutableSetOf()) { it.id },
-                                    onSongSelected = onSongSelected,
+                                    onSongSelected = { song -> onSongSelected(song, filteredSongs) },
                                     onTogglePin = onTogglePin,
                                     onAddToPlaylist = { songToAddToPlaylist = it }
                                 )
@@ -265,7 +265,9 @@ fun MusicLibraryScreen(
                                     songs = filteredPinnedSongs,
                                     selectedSongId = selectedSongId,
                                     pinnedSongIds = pinnedSongs.mapTo(mutableSetOf()) { it.id },
-                                    onSongSelected = onSongSelected,
+                                    onSongSelected = { song ->
+                                        onSongSelected(song, filteredPinnedSongs)
+                                    },
                                     onTogglePin = onTogglePin,
                                     onAddToPlaylist = { songToAddToPlaylist = it }
                                 )
@@ -282,7 +284,9 @@ fun MusicLibraryScreen(
                                 onCreatePlaylist = { showCreatePlaylistDialog = true },
                                 onSelectPlaylist = onSelectPlaylist,
                                 onDeletePlaylist = onDeletePlaylist,
-                                onSongSelected = onSongSelected,
+                                onSongSelected = { song, playlistSongs ->
+                                    onSongSelected(song, playlistSongs)
+                                },
                                 onTogglePin = onTogglePin,
                                 onAddToPlaylist = { songToAddToPlaylist = it }
                             )
@@ -449,7 +453,7 @@ private fun ColumnScope.PlaylistContent(
     onCreatePlaylist: () -> Unit,
     onSelectPlaylist: (PlaylistEntity?) -> Unit,
     onDeletePlaylist: (PlaylistEntity) -> Unit,
-    onSongSelected: (Song) -> Unit,
+    onSongSelected: (Song, List<Song>) -> Unit,
     onTogglePin: (Song) -> Unit,
     onAddToPlaylist: (Song) -> Unit
 ) {
@@ -536,7 +540,7 @@ private fun ColumnScope.PlaylistContent(
                             song = song,
                             selected = song.id == selectedSongId,
                             isPinned = song.id in pinnedSongIds,
-                            onClick = { onSongSelected(song) },
+                            onClick = { onSongSelected(song, playlistSongs) },
                             onTogglePin = { onTogglePin(song) },
                             onAddToPlaylist = { onAddToPlaylist(song) }
                         )

@@ -16,6 +16,11 @@ interface NotesDao {
     @Query("SELECT * FROM note_drafts WHERE song_uri = :songUri ORDER BY createdAt, id")
     suspend fun getDraftsForSongOnce(songUri: String): List<NoteDraft>
 
+    @Query(
+        "SELECT * FROM note_drafts WHERE song_uri = :songUri AND draftTitle = :draftTitle ORDER BY id LIMIT 1"
+    )
+    suspend fun getDraftForSongAndTitle(songUri: String, draftTitle: String): NoteDraft?
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertNoteEntity(noteEntity: NoteEntity)
 
