@@ -38,4 +38,4 @@ The relational database utilizes versioned, non-destructive schema migrations to
 ### Compilation
 1. Clone the repository:
    ```bash
-   git clone [https://github.com/Ayushwithcodes/Beatnote.git](https://github.com/Ayushwithcodes/Beatnote.git)
+   git clone https://github.com/Ayushwithcodes/BeatNote-App.git
